@@ -1,0 +1,6 @@
+virtualmachines:
+  hosts:
+    vm01:
+      ansible_host: 139.59.215.140
+  vars:
+    ansible_user: root
