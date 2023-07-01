@@ -1,6 +1,20 @@
 version: '3'
 
 services:
+  traefik:
+    image: "traefik:v2.10"
+    container_name: "traefik"
+    command:
+      #- "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "8081:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
   # Database
   db:
     image: mysql:5.7
@@ -14,6 +28,7 @@ services:
       MYSQL_PASSWORD: wordpress
     networks:
       - wpsite
+
   # phpmyadmin
   phpmyadmin:
     depends_on:
@@ -27,6 +42,7 @@ services:
       MYSQL_ROOT_PASSWORD: password 
     networks:
       - wpsite
+
   # Wordpress
   wordpress:
     depends_on:
@@ -42,6 +58,10 @@ services:
       WORDPRESS_DB_PASSWORD: wordpress
     networks:
       - wpsite
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.wordpress.rule=Path(`/wp`)"
+      - "traefik.http.routers.wordpress.entrypoints=web"
 networks:
   wpsite:
 volumes:
