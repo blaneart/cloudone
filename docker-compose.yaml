@@ -5,15 +5,23 @@ services:
     image: "traefik:v2.10"
     container_name: "traefik"
     command:
-      #- "--log.level=DEBUG"
+      - "--log.level=DEBUG"
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      - --entrypoints.web-secure.address=:443
       - "--entrypoints.web.address=:80"
+      - --providers.file.directory=/configuration/
+      - --providers.file.watch=true
     ports:
-      - "8081:8080"
+      - "80:80" 
+      - "8080:8080"      
+      - "443:443" # Docker sends requests on port 443 to Traefik on port 443
+
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "/configuration/:/configuration/"
+      - "/certs/:/certs/"
 
   # Database
   db:
@@ -35,21 +43,31 @@ services:
       - db
     image: phpmyadmin/phpmyadmin
     restart: always
-    ports:
-      - '8080:80'
+    # ports:
+      # - '8080:80'
     environment:
       PMA_HOST: db
       MYSQL_ROOT_PASSWORD: password 
     networks:
       - wpsite
 
+      # chtobi test fast
+
+  my-app:
+    image: traefik/whoami
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.my-app.rule=Path(`/healthcheck`)"
+      - "traefik.http.routers.my-app.tls=true"
+      - "traefik.http.routers.whoami.entrypoints=web"
+
   # Wordpress
   wordpress:
     depends_on:
       - db
     image: wordpress:latest
-    ports:
-      - '8000:80'
+    # ports:
+      # - '8000:80'
     restart: always
     volumes: ['./:/var/www/html']
     environment:

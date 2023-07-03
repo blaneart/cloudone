@@ -1,7 +1,6 @@
 - name: Initialize everything
   hosts: localhost
   tasks:
-
     - name: Create a new Droplet
       community.digitalocean.digital_ocean_droplet:
         state: active
@@ -11,6 +10,11 @@
         region: fra1
         image: ubuntu-20-04-x64
         wait_timeout: 500
+        # Note: those are IDs of the keys in our account
+        # These don't give you access anywhere, unless you control the account
+        # This is why whe keep this checked in. The API key,
+        # which does give you control over the DO account, is passed via environment
+        # variables.
         ssh_keys: [  
           "38713791", # Artem's key
           "37677128", # Arseniy's key  
@@ -69,7 +73,6 @@
         name: pyOpenSSL
         state: latest
 
-
     - name: Install Docker Module for Python
       pip:
         name: docker
@@ -82,6 +85,29 @@
         dest: "/kek/"
       loop:
         - docker-compose.yaml
+
+    - name: Create a directory if it does not exist
+      ansible.builtin.file:
+        path: /certs
+        state: directory
+        mode: '0755'
+
+    # Creating a self-signed certificate
+    - name: Create private key (RSA, 4096 bits)
+      community.crypto.openssl_privatekey:
+        path: /certs/certificate.key
+
+    - name: Create simple self-signed certificate
+      community.crypto.x509_certificate:
+        path: /certs/certificate.pem
+        privatekey_path: /certs/certificate.key
+        provider: selfsigned
+
+    # Send configuration files to the machine
+    - name: Synchronization of src on the control machine to dest on the remote hosts
+      ansible.posix.synchronize:
+        src: configuration
+        dest: /configuration
 
     - name: deploy Docker Compose stack
       community.docker.docker_compose:

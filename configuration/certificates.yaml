@@ -1,0 +1,6 @@
+# Dynamic configuration
+
+tls:
+  certificates:
+    - certFile: /certs/certificate.pem
+      keyFile: /certs/certificate.key
