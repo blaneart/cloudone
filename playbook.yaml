@@ -1,10 +1,11 @@
 - name: Initialize everything
+  gather_facts: False 
   hosts: localhost
   tasks:
     - name: Create a new Droplet
       community.digitalocean.digital_ocean_droplet:
         state: active
-        api_token: "dop_v1_55c43834af6f014be76357221fa9befd71c11638a5bbd50fa2d3583a52983101"
+        api_token: "{{ lookup('ansible.builtin.env', 'DO_API_KEY') }}"
         name: mydroplet
         size: s-1vcpu-2gb
         region: fra1
@@ -39,6 +40,7 @@
 
 - name: "Installation steps on the machine"
   hosts: virtualmachines
+  gather_facts: False 
   tasks:
     - name: Install required system packages
       apt:
@@ -85,7 +87,13 @@
         dest: "/kek/"
       loop:
         - docker-compose.yaml
-
+    - name: copy db
+      copy:
+        src: "{{ item }}"
+        dest: "/kek/db/"
+      loop:
+        - db/wordpress.sql
+        
     - name: Create a directory if it does not exist
       ansible.builtin.file:
         path: /certs

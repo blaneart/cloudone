@@ -1,6 +1,7 @@
 venv:
 	virtualenv venv --python=python3
 
+
 reqs: venv
 	. venv/bin/activate; pip install -Ur requirements.txt
 
