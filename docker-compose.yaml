@@ -16,6 +16,9 @@ services:
       - --providers.file.directory=/configuration/
       - --providers.file.watch=true
       - "--accesslog=true"
+      - --entrypoints.web.http.redirections.entryPoint.to=web-secure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --entrypoints.web.http.redirections.entrypoint.permanent=true
     ports:
       - "80:80" 
       - "8080:8080"      
@@ -75,8 +78,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.my-app.rule=Path(`/healthcheck`)"
-      - "traefik.http.routers.my-app.tls=true"
-      - "traefik.http.routers.whoami.entrypoints=web"
+      # - "traefik.http.routers.my-app.tls=true"
+      - "traefik.http.routers.my-app.entrypoints=web"
 
   # Wordpress
   wordpress:
@@ -106,6 +109,8 @@ services:
       # - "traefik.http.middlewares.wordpress-stripprefix.stripprefix.prefixes=/wp"
       - "traefik.http.routers.wordpress.entrypoints=web-secure"
       - "traefik.http.routers.wordpress.tls=true"
+      - "traefik.http.middlewares.root-to-wp.redirectregex.regex=^https:\\/\\/([^\\/]+)\\/?$$"
+      - "traefik.http.middlewares.root-to-wp.redirectregex.replacement=https://$$1/wp"
 networks:
   wpsite:
 volumes:

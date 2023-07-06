@@ -1,12 +1,17 @@
 - name: Initialize everything
   gather_facts: False 
   hosts: localhost
+  vars_prompt:
+  - name: droplet_number
+    prompt: How many virtual machines do you want to set up?
+    private: false
+    default: "1"
   tasks:
     - name: Create a new Droplet
       community.digitalocean.digital_ocean_droplet:
         state: active
         api_token: "{{ lookup('ansible.builtin.env', 'DO_API_KEY') }}"
-        name: mydroplet
+        name: "droplet-{{ item }}"
         size: s-1vcpu-2gb
         region: fra1
         image: ubuntu-20-04-x64
@@ -22,26 +27,32 @@
         ]
         unique_name: true
       register: my_droplet
-
+      with_sequence: "{{ droplet_number }}"
     - name: Show Droplet info
       ansible.builtin.debug:
         msg: |
-          Droplet ID is {{ my_droplet.data.droplet.id }}
-          First Public IPv4 is {{ (my_droplet.data.droplet.networks.v4 | selectattr('type', 'equalto', 'public')).0.ip_address | default('<none>', true) }}
-          First Private IPv4 is {{ (my_droplet.data.droplet.networks.v4 | selectattr('type', 'equalto', 'private')).0.ip_address | default('<none>', true) }}
+          Droplet ID is "{{ item }}"
+      with_items: "{{ my_droplet.results }}"
 
-    - name: Add host to group 'just_created' with variable foo=42
+    - name: Add the newly created droplet(s) to the group of Ansible hosts
       ansible.builtin.add_host:
-        name: "cloud-one"
-        ansible_host: "{{ (my_droplet.data.droplet.networks.v4 | selectattr('type', 'equalto', 'public')).0.ip_address | default('<none>', true) }}"
+        name: "{{ item.data.droplet.name }}"
+        ansible_host: "{{ (item.data.droplet.networks.v4 | selectattr('type', 'equalto', 'public')).0.ip_address | default('<none>', true) }}"
         ansible_user: root
         groups:
           - virtualmachines
+      with_items: "{{ my_droplet.results }}"
 
 - name: "Installation steps on the machine"
   hosts: virtualmachines
-  gather_facts: False 
   tasks:
+    - name: Wait for ssh to come up
+      wait_for:
+        host: "{{ ansible_ssh_host }}"
+        port: 22
+        delay: 10
+        timeout: 30
+       
     - name: Install required system packages
       apt:
         pkg:
@@ -122,3 +133,20 @@
         project_src: /kek/
         files:
           - docker-compose.yaml
+    
+    - name: Create a subdomain for every droplet (useful if we have many machines)
+      community.general.cloudflare_dns:
+        zone: cloudone.space
+        record: "{{ inventory_hostname }}"
+        type: A
+        value: "{{ ansible_ssh_host }}"
+        # account_email: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_EMAIL') }}"
+        api_token: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_API_TOKEN') }}"
+        proxied: true
+
+    - name: Show instructions to connect
+      ansible.builtin.debug:
+        msg: |
+          All done! You can connect to the server on "{{ ansible_ssh_host }}"
+
+
