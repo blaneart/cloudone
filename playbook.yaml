@@ -26,13 +26,8 @@
           "37677128", # Arseniy's key  
         ]
         unique_name: true
-      register: my_droplet
+      register: created_droplets
       with_sequence: "{{ droplet_number }}"
-    - name: Show Droplet info
-      ansible.builtin.debug:
-        msg: |
-          Droplet ID is "{{ item }}"
-      with_items: "{{ my_droplet.results }}"
 
     - name: Add the newly created droplet(s) to the group of Ansible hosts
       ansible.builtin.add_host:
@@ -41,7 +36,14 @@
         ansible_user: root
         groups:
           - virtualmachines
-      with_items: "{{ my_droplet.results }}"
+      with_items: "{{ created_droplets.results }}"
+
+    # We use a reserved domain since DNS takes a bit of time to update
+    - name: "Attach our reserved IP to the first droplet for the main domain to function"
+      community.digitalocean.digital_ocean_floating_ip:
+        state: attached
+        ip: "{{ lookup('ansible.builtin.env', 'RESERVED_IP') }}"
+        droplet_id: "{{ created_droplets.results[0].data.droplet.id }}"
 
 - name: "Installation steps on the machine"
   hosts: virtualmachines
@@ -52,20 +54,7 @@
         port: 22
         delay: 10
         timeout: 30
-       
-    - name: Install required system packages
-      apt:
-        pkg:
-          - apt-transport-https
-          - ca-certificates
-          - curl
-          - software-properties-common
-          - python3-pip
-          - virtualenv
-          - python3-setuptools
-        state: latest
-        update_cache: true
-      become: true
+
     - name: Add Docker GPG apt Key
       apt_key:
         url: https://download.docker.com/linux/ubuntu/gpg
@@ -76,36 +65,37 @@
         repo: deb https://download.docker.com/linux/ubuntu focal stable
         state: present
 
-    - name: Update apt and install docker-ce
+    - name: Install required system packages
       apt:
-        name: docker-ce
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - python3-pip
+          - virtualenv
+          - python3-setuptools
+          - docker-ce
         state: latest
         update_cache: true
-    - name: Install pyOpenSSL
+      become: true
+
+    - name: Install Python modules
       pip:
-        name: pyOpenSSL
+        name:
+          - pyOpenSSL
+          - docker
+          - docker-compose
         state: latest
 
-    - name: Install Docker Module for Python
-      pip:
-        name: docker
-    - name: Install Docker Compose Module for Python
-      pip:
-        name: docker-compose
     - name: copy Docker Compose files
       copy:
         src: "{{ item }}"
         dest: "/kek/"
       loop:
         - docker-compose.yaml
-    - name: copy db
-      copy:
-        src: "{{ item }}"
-        dest: "/kek/db/"
-      loop:
-        - db/wordpress.sql
         
-    - name: Create a directory if it does not exist
+    - name: Create certs directory if it does not exist
       ansible.builtin.file:
         path: /certs
         state: directory
@@ -128,19 +118,76 @@
         src: configuration
         dest: /configuration
 
-    - name: deploy Docker Compose stack
+    - name: Deploy Docker Compose
       community.docker.docker_compose:
         project_src: /kek/
         files:
           - docker-compose.yaml
+      environment:
+        WORDPRESS_DB_PASSWORD: "{{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"
+        MYSQL_ROOT_PASSWORD: "{{ lookup('ansible.builtin.password', 'credentials/' + '/mysqlpassword', length=15) }}"
+
+    - name: Run WP installer and create DB
+      community.docker.docker_container:
+        name: wordpress-db-creator
+        image: wordpress:cli
+        command: ["wp", "db", "create"]
+        networks:
+          - name: kek_wpsite
+        env:
+          WORDPRESS_DB_HOST: "db:3306"
+          WORDPRESS_DB_USER: "wordpress"
+          WORDPRESS_DB_PASSWORD: "{{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"
+        volumes: 
+          - '/kek/:/var/www/html'
+      register: result
+
+    - name: Print stdout
+      ansible.builtin.debug:
+        var: result.stdout
     
+    - name: Print stderr lines
+      ansible.builtin.debug:
+        var: result.stderr_lines
+
+    - name: Run WP installer and install WP
+      community.docker.docker_container:
+        name: wordpress-installer
+        image: wordpress:cli
+        command: [
+          "wp", 
+          "core", 
+          "install",
+          "--url=https://cloudone.space/wp",
+          "--title=cloudone",
+          "--admin_user=blash",
+          "--admin_password={{ lookup('ansible.builtin.password', 'credentials/' + '/wpadminpassword', length=15) }}",
+          "--admin_email=info@wp-cli.org"
+          ]
+        networks:
+          - name: kek_wpsite
+        env:
+          WORDPRESS_DB_HOST: "db:3306"
+          WORDPRESS_DB_USER: "wordpress"
+          WORDPRESS_DB_PASSWORD: "{{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"
+        volumes: 
+          - '/kek/:/var/www/html'
+      register: result
+
+    - name: Print stdout
+      ansible.builtin.debug:
+        var: result.stdout
+    
+    - name: Print stderr lines
+      ansible.builtin.debug:
+        var: result.stderr_lines
+
     - name: Create a subdomain for every droplet (useful if we have many machines)
       community.general.cloudflare_dns:
         zone: cloudone.space
         record: "{{ inventory_hostname }}"
         type: A
         value: "{{ ansible_ssh_host }}"
-        # account_email: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_EMAIL') }}"
         api_token: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_API_TOKEN') }}"
         proxied: true
 
@@ -148,5 +195,7 @@
       ansible.builtin.debug:
         msg: |
           All done! You can connect to the server on "{{ ansible_ssh_host }}"
-
-
+          MySQL root password: "{{ lookup('ansible.builtin.password', 'credentials/' + '/mysqlpassword', length=15) }}"
+          Wordpress DB password: "{{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"
+          Wordpress admin user: blash
+          Wordpress admin password: {{ lookup('ansible.builtin.password', 'credentials/' + '/wpadminpassword', length=15) }}
