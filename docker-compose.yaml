@@ -1,4 +1,4 @@
-version: '3'
+version: "3"
 
 services:
   traefik:
@@ -12,7 +12,7 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web-secure.address=:443
-      - "--entrypoints.web.address=:80"
+      - --entrypoints.web.address=:80
       - --providers.file.directory=/configuration/
       - --providers.file.watch=true
       - --accesslog=true
@@ -20,8 +20,8 @@ services:
       - --entrypoints.web.http.redirections.entryPoint.scheme=https
       - --entrypoints.web.http.redirections.entrypoint.permanent=true
     ports:
-      - "80:80" 
-      - "8080:8080"      
+      - "80:80"
+      - "8080:8080"
       - "443:443" # Docker sends requests on port 443 to Traefik on port 443
 
     volumes:
@@ -60,7 +60,7 @@ services:
     restart: always
     environment:
       PMA_HOST: db
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD} 
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       PMA_ABSOLUTE_URI: https://cloudone.space/pma
     networks:
       - wpsite
@@ -72,10 +72,10 @@ services:
 
       - "traefik.http.middlewares.phpmyadmin-stripprefix.stripprefix.prefixes=/pma"
       - "traefik.http.middlewares.phpmyadmin.stripprefix.forceSlash=true"
-      
+
       - "traefik.http.middlewares.custom_pma_repath.redirectregex.regex=pma$$"
       - "traefik.http.middlewares.custom_pma_repath.redirectregex.replacement=pma/"
-      
+
       - "traefik.http.routers.phpmyadmin.middlewares=custom_pma_repath,phpmyadmin-stripprefix"
 
   # Wordpress
@@ -84,7 +84,7 @@ services:
       - db
     image: wordpress:latest
     restart: always
-    volumes: ['./:/var/www/html/wp']
+    volumes: ["./:/var/www/html/wp"]
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_USER: wordpress

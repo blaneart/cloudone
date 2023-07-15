@@ -38,13 +38,6 @@
           - virtualmachines
       with_items: "{{ created_droplets.results }}"
 
-    # We use a reserved domain since DNS takes a bit of time to update
-    # - name: "Attach our reserved IP to the first droplet for the main domain to function"
-    #   community.digitalocean.digital_ocean_floating_ip:
-    #     state: attached
-    #     ip: "{{ lookup('ansible.builtin.env', 'RESERVED_IP') }}"
-    #     droplet_id: "{{ created_droplets.results[0].data.droplet.id }}"
-
 - name: "Installation steps on the machine"
   hosts: virtualmachines
   tasks:
