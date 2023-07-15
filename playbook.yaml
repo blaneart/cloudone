@@ -1,11 +1,11 @@
 - name: Initialize everything
-  gather_facts: False 
+  gather_facts: False
   hosts: localhost
   vars_prompt:
-  - name: droplet_number
-    prompt: How many virtual machines do you want to set up?
-    private: false
-    default: "1"
+    - name: droplet_number
+      prompt: How many virtual machines do you want to set up?
+      private: false
+      default: "1"
   tasks:
     - name: Create a new Droplet
       community.digitalocean.digital_ocean_droplet:
@@ -20,11 +20,11 @@
         # This is why whe keep this checked in. The API key,
         # which does give you control over the DO account, is passed via environment
         # variables.
-        ssh_keys: [  
-          "38713791", # Artem's key
-          "37677128", # Arseniy's key 
-          "30991602" 
-        ]
+        ssh_keys: [
+            "38713791", # Artem's key
+            "37677128", # Arseniy's key
+            "30991602", # Arseniy's home key
+          ]
         unique_name: true
       register: created_droplets
       with_sequence: "{{ droplet_number }}"
@@ -39,11 +39,11 @@
       with_items: "{{ created_droplets.results }}"
 
     # We use a reserved domain since DNS takes a bit of time to update
-    - name: "Attach our reserved IP to the first droplet for the main domain to function"
-      community.digitalocean.digital_ocean_floating_ip:
-        state: attached
-        ip: "{{ lookup('ansible.builtin.env', 'RESERVED_IP') }}"
-        droplet_id: "{{ created_droplets.results[0].data.droplet.id }}"
+    # - name: "Attach our reserved IP to the first droplet for the main domain to function"
+    #   community.digitalocean.digital_ocean_floating_ip:
+    #     state: attached
+    #     ip: "{{ lookup('ansible.builtin.env', 'RESERVED_IP') }}"
+    #     droplet_id: "{{ created_droplets.results[0].data.droplet.id }}"
 
 - name: "Installation steps on the machine"
   hosts: virtualmachines
@@ -52,14 +52,13 @@
       wait_for:
         host: "{{ ansible_ssh_host }}"
         port: 22
-        delay: 10
+        delay: 15
         timeout: 30
 
     - name: Add Docker GPG apt Key
       apt_key:
         url: https://download.docker.com/linux/ubuntu/gpg
         state: present
-      
 
     - name: Add Docker Repository
       apt_repository:
@@ -98,12 +97,12 @@
       copy:
         src: "docker-compose.yaml"
         dest: "/deploy/"
-        
+
     - name: Create directories for certificates
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
-        mode: '0755'
+        mode: "0755"
       loop:
         - /certs
         - /certs/traefik
@@ -134,9 +133,9 @@
         privatekey_path: /certs/ca-certificate.key
         privatekey_passphrase: "{{ lookup('ansible.builtin.password', 'credentials/' + '/ca-certificate-passphrase', length=15) }}"
         common_name: CloudOne SA
-        use_common_name_for_san: false  # since we do not specify SANs, don't use CN as a SAN
+        use_common_name_for_san: false # since we do not specify SANs, don't use CN as a SAN
         basic_constraints:
-          - 'CA:TRUE'
+          - "CA:TRUE"
         basic_constraints_critical: true
         key_usage:
           - keyCertSign
@@ -156,7 +155,7 @@
       community.crypto.openssl_privatekey:
         path: /certs/mysql/certificate.key
         mode: "0744"
-    
+
     - name: Create certificate signing request (CSR) for new certificate
       community.crypto.openssl_csr_pipe:
         privatekey_path: /certs/mysql/certificate.key
@@ -177,16 +176,15 @@
         ownca_path: /certs/ca-certificate.pem
         ownca_privatekey_path: /certs/ca-certificate.key
         ownca_privatekey_passphrase: "{{ lookup('ansible.builtin.password', 'credentials/' + '/ca-certificate-passphrase', length=15) }}"
-        ownca_not_after: +365d  # valid for one year
-        ownca_not_before: "-1d"  # valid since yesterday
+        ownca_not_after: +365d # valid for one year
+        ownca_not_before: "-1d" # valid since yesterday
 
-  # Create cert for phpmyadmin
-
-    - name: Create private key for new certificate (mysql)
+    # Create cert for phpmyadmin
+    - name: Create private key for new certificate (pma)
       community.crypto.openssl_privatekey:
         path: /certs/pma/certificate.key
         mode: "0744"
-    
+
     - name: Create certificate signing request (CSR) for new certificate
       community.crypto.openssl_csr_pipe:
         privatekey_path: /certs/pma/certificate.key
@@ -203,9 +201,8 @@
         ownca_path: /certs/ca-certificate.pem
         ownca_privatekey_path: /certs/ca-certificate.key
         ownca_privatekey_passphrase: "{{ lookup('ansible.builtin.password', 'credentials/' + '/ca-certificate-passphrase', length=15) }}"
-        ownca_not_after: +365d  # valid for one year
-        ownca_not_before: "-1d"  # valid since yesterday
-
+        ownca_not_after: +365d # valid for one year
+        ownca_not_before: "-1d" # valid since yesterday
 
     # Send configuration files to the machine
     - name: Copy configuration
@@ -234,8 +231,8 @@
           WORDPRESS_DB_HOST: "db:3306"
           WORDPRESS_DB_USER: "wordpress"
           WORDPRESS_DB_PASSWORD: "{{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"
-        volumes: 
-          - '/deploy/:/var/www/html'
+        volumes:
+          - "/deploy/:/var/www/html"
       register: result
 
     - name: Wait for wordpress to come up
@@ -249,15 +246,16 @@
       community.docker.docker_container:
         name: wordpress-installer
         image: wordpress:cli
-        command: [
-          "wp", 
-          "core", 
-          "install",
-          "--url=https://cloudone.space/wp",
-          "--title=cloudone",
-          "--admin_user=blash",
-          "--admin_password={{ lookup('ansible.builtin.password', 'credentials/' + '/wpadminpassword', length=15) }}",
-          "--admin_email=info@wp-cli.org"
+        command:
+          [
+            "wp",
+            "core",
+            "install",
+            "--url=https://cloudone.space/wp",
+            "--title=cloudone",
+            "--admin_user=blash",
+            "--admin_password={{ lookup('ansible.builtin.password', 'credentials/' + '/wpadminpassword', length=15) }}",
+            "--admin_email=info@wp-cli.org",
           ]
         networks:
           - name: deploy_wpsite
@@ -265,8 +263,8 @@
           WORDPRESS_DB_HOST: "db:3306"
           WORDPRESS_DB_USER: "wordpress"
           WORDPRESS_DB_PASSWORD: "{{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"
-        volumes: 
-          - '/deploy/:/var/www/html'
+        volumes:
+          - "/deploy/:/var/www/html"
       register: result
 
     - name: Create a subdomain for every droplet (useful if we have many machines)
