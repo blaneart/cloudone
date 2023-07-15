@@ -59,11 +59,17 @@
       apt_key:
         url: https://download.docker.com/linux/ubuntu/gpg
         state: present
+      
 
     - name: Add Docker Repository
       apt_repository:
         repo: deb https://download.docker.com/linux/ubuntu focal stable
         state: present
+      register: docker_result
+      until: docker_result is succeeded
+      retries: 3
+      delay: 5
+      failed_when: docker_result is failure
 
     - name: Install required system packages
       apt:
@@ -90,34 +96,19 @@
 
     - name: copy Docker Compose files
       copy:
-        src: "{{ item }}"
-        dest: "/kek/"
-      loop:
-        - docker-compose.yaml
+        src: "docker-compose.yaml"
+        dest: "/deploy/"
         
-    - name: Create certs directory if it does not exist
+    - name: Create directories for certificates
       ansible.builtin.file:
-        path: /certs
+        path: "{{ item }}"
         state: directory
         mode: '0755'
-
-    - name: Create certs traefik directory if it does not exist
-      ansible.builtin.file:
-        path: /certs/traefik
-        state: directory
-        mode: '0755'
-    
-    - name: Create certs mysql directory if it does not exist
-      ansible.builtin.file:
-        path: /certs/mysql
-        state: directory
-        mode: '0755'
-    
-    - name: Create certs pma directory if it does not exist
-      ansible.builtin.file:
-        path: /certs/pma
-        state: directory
-        mode: '0755'
+      loop:
+        - /certs
+        - /certs/traefik
+        - /certs/mysql
+        - /certs/pma
 
     # Creating a self-signed certificate for traefik
     - name: Create private key for traefik (RSA, 4096 bits)
@@ -126,7 +117,8 @@
 
     - name: Create simple self-signed certificate for traefik
       community.crypto.x509_certificate:
-        path: /certs/certificate.pem
+        path: /certs/traefik/certificate.pem
+        mode: "0744"
         privatekey_path: /certs/traefik/certificate.key
         provider: selfsigned
 
@@ -163,16 +155,22 @@
     - name: Create private key for new certificate (mysql)
       community.crypto.openssl_privatekey:
         path: /certs/mysql/certificate.key
+        mode: "0744"
     
     - name: Create certificate signing request (CSR) for new certificate
       community.crypto.openssl_csr_pipe:
         privatekey_path: /certs/mysql/certificate.key
+        common_name: db
+        country_name: FR
+        organization_name: CloudOne
+        email_address: admin@cloudone.space
       run_once: true
       register: csr
 
     - name: Sign certificate with our CA
       community.crypto.x509_certificate:
         path: /certs/mysql/certificate.pem
+        mode: "0744"
         csr_content: "{{ csr.csr }}"
         privatekey_path: /certs/mysql/certificate.key
         provider: ownca
@@ -182,12 +180,12 @@
         ownca_not_after: +365d  # valid for one year
         ownca_not_before: "-1d"  # valid since yesterday
 
-
   # Create cert for phpmyadmin
 
     - name: Create private key for new certificate (mysql)
       community.crypto.openssl_privatekey:
         path: /certs/pma/certificate.key
+        mode: "0744"
     
     - name: Create certificate signing request (CSR) for new certificate
       community.crypto.openssl_csr_pipe:
@@ -198,6 +196,7 @@
     - name: Sign certificate with our CA
       community.crypto.x509_certificate:
         path: /certs/pma/certificate.pem
+        mode: "0744"
         csr_content: "{{ csr.csr }}"
         privatekey_path: /certs/pma/certificate.key
         provider: ownca
@@ -213,13 +212,11 @@
       copy:
         src: configuration
         dest: /
-      loop:
-        - configuration
 
     - name: Deploy Docker Compose
       community.docker.docker_compose:
         recreate: always
-        project_src: /kek/
+        project_src: /deploy/
         files:
           - docker-compose.yaml
       environment:
@@ -232,14 +229,21 @@
         image: wordpress:cli
         command: ["wp", "db", "create"]
         networks:
-          - name: kek_wpsite
+          - name: deploy_wpsite
         env:
           WORDPRESS_DB_HOST: "db:3306"
           WORDPRESS_DB_USER: "wordpress"
           WORDPRESS_DB_PASSWORD: "{{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"
         volumes: 
-          - '/kek/:/var/www/html'
+          - '/deploy/:/var/www/html'
       register: result
+
+    - name: Wait for wordpress to come up
+      wait_for:
+        host: "{{ ansible_ssh_host }}"
+        port: 80
+        delay: 10
+        timeout: 30
 
     - name: Run WP installer and install WP
       community.docker.docker_container:
@@ -256,13 +260,13 @@
           "--admin_email=info@wp-cli.org"
           ]
         networks:
-          - name: kek_wpsite
+          - name: deploy_wpsite
         env:
           WORDPRESS_DB_HOST: "db:3306"
           WORDPRESS_DB_USER: "wordpress"
           WORDPRESS_DB_PASSWORD: "{{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"
         volumes: 
-          - '/kek/:/var/www/html'
+          - '/deploy/:/var/www/html'
       register: result
 
     - name: Create a subdomain for every droplet (useful if we have many machines)
@@ -273,6 +277,7 @@
         value: "{{ ansible_ssh_host }}"
         api_token: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_API_TOKEN') }}"
         proxied: true
+        solo: true
 
     - name: Show instructions to connect
       ansible.builtin.debug:

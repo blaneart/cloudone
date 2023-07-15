@@ -1,10 +1,5 @@
 <?php
-$cfg['TitleDefault'] = 'Testing if it works';
-$cfg['TitleServer'] = 'Testing if it works';
-$cfg['TitleTable'] = 'Testing if it works';
-$cfg['TitleDatabase'] = 'Testing if it works';
-
-$i=0;
+$i = 0;
 $i++;
 $cfg['Servers'][$i]['ssl'] = true;
 $cfg['Servers'][$i]['ssl_key'] = '/certs/pma/certificate.key';

@@ -7,15 +7,15 @@ services:
     restart: always
 
     command:
-      - "--log.level=DEBUG"
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
+      - --log.level=DEBUG
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
       - --entrypoints.web-secure.address=:443
       - "--entrypoints.web.address=:80"
       - --providers.file.directory=/configuration/
       - --providers.file.watch=true
-      - "--accesslog=true"
+      - --accesslog=true
       - --entrypoints.web.http.redirections.entryPoint.to=web-secure
       - --entrypoints.web.http.redirections.entryPoint.scheme=https
       - --entrypoints.web.http.redirections.entrypoint.permanent=true
@@ -34,10 +34,11 @@ services:
 
   # Database
   db:
-    image: mysql:5.7
+    image: mysql:8
     volumes:
       - db_data:/var/lib/mysql
       - /configuration/my.cnf:/etc/mysql/conf.d/config-file.cnf
+      - /certs/:/certs/
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -98,9 +99,10 @@ services:
       - "traefik.http.routers.wordpress.entrypoints=web-secure"
       - "traefik.http.routers.wordpress.tls=true"
 
+      - "traefik.http.middlewares.wp_root_redirect.redirectregex.regex=\\.([a-zA-Z0-9]+)\\/$$"
+      - "traefik.http.middlewares.wp_root_redirect.redirectregex.replacement=.$$1/wp/"
       - "traefik.http.routers.wordpress.middlewares=wp_root_redirect"
-      - "traefik.http.middlewares.wp_root_redirect.redirectregex.regex=\\^/$$"
-      - "traefik.http.middlewares.wp_root_redirect.redirectregex.replacement=/wp/"
+
 networks:
   wpsite:
 volumes:
