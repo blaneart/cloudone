@@ -10,7 +10,6 @@
     - name: Create a new Droplet
       community.digitalocean.digital_ocean_droplet:
         state: active
-        api_token: "{{ lookup('ansible.builtin.env', 'DO_API_KEY') }}"
         name: "droplet-{{ item }}"
         size: s-1vcpu-2gb
         region: fra1
@@ -23,7 +22,8 @@
         # variables.
         ssh_keys: [  
           "38713791", # Artem's key
-          "37677128", # Arseniy's key  
+          "37677128", # Arseniy's key 
+          "30991602" 
         ]
         unique_name: true
       register: created_droplets
@@ -101,25 +101,124 @@
         state: directory
         mode: '0755'
 
-    # Creating a self-signed certificate
-    - name: Create private key (RSA, 4096 bits)
-      community.crypto.openssl_privatekey:
-        path: /certs/certificate.key
+    - name: Create certs traefik directory if it does not exist
+      ansible.builtin.file:
+        path: /certs/traefik
+        state: directory
+        mode: '0755'
+    
+    - name: Create certs mysql directory if it does not exist
+      ansible.builtin.file:
+        path: /certs/mysql
+        state: directory
+        mode: '0755'
+    
+    - name: Create certs pma directory if it does not exist
+      ansible.builtin.file:
+        path: /certs/pma
+        state: directory
+        mode: '0755'
 
-    - name: Create simple self-signed certificate
+    # Creating a self-signed certificate for traefik
+    - name: Create private key for traefik (RSA, 4096 bits)
+      community.crypto.openssl_privatekey:
+        path: /certs/traefik/certificate.key
+
+    - name: Create simple self-signed certificate for traefik
       community.crypto.x509_certificate:
         path: /certs/certificate.pem
-        privatekey_path: /certs/certificate.key
+        privatekey_path: /certs/traefik/certificate.key
         provider: selfsigned
 
+    # Create a CA
+    - name: Create private key with password protection
+      community.crypto.openssl_privatekey:
+        path: /certs/ca-certificate.key
+        cipher: auto
+        passphrase: "{{ lookup('ansible.builtin.password', 'credentials/' + '/ca-certificate-passphrase', length=15) }}"
+
+    - name: Create certificate signing request (CSR) for CA certificate
+      community.crypto.openssl_csr_pipe:
+        privatekey_path: /certs/ca-certificate.key
+        privatekey_passphrase: "{{ lookup('ansible.builtin.password', 'credentials/' + '/ca-certificate-passphrase', length=15) }}"
+        common_name: CloudOne SA
+        use_common_name_for_san: false  # since we do not specify SANs, don't use CN as a SAN
+        basic_constraints:
+          - 'CA:TRUE'
+        basic_constraints_critical: true
+        key_usage:
+          - keyCertSign
+        key_usage_critical: true
+      register: ca_csr
+
+    - name: Create self-signed CA certificate from CSR
+      community.crypto.x509_certificate:
+        path: /certs/ca-certificate.pem
+        csr_content: "{{ ca_csr.csr }}"
+        privatekey_path: /certs/ca-certificate.key
+        privatekey_passphrase: "{{ lookup('ansible.builtin.password', 'credentials/' + '/ca-certificate-passphrase', length=15) }}"
+        provider: selfsigned
+
+    # Create cert for mysql
+    - name: Create private key for new certificate (mysql)
+      community.crypto.openssl_privatekey:
+        path: /certs/mysql/certificate.key
+    
+    - name: Create certificate signing request (CSR) for new certificate
+      community.crypto.openssl_csr_pipe:
+        privatekey_path: /certs/mysql/certificate.key
+      run_once: true
+      register: csr
+
+    - name: Sign certificate with our CA
+      community.crypto.x509_certificate:
+        path: /certs/mysql/certificate.pem
+        csr_content: "{{ csr.csr }}"
+        privatekey_path: /certs/mysql/certificate.key
+        provider: ownca
+        ownca_path: /certs/ca-certificate.pem
+        ownca_privatekey_path: /certs/ca-certificate.key
+        ownca_privatekey_passphrase: "{{ lookup('ansible.builtin.password', 'credentials/' + '/ca-certificate-passphrase', length=15) }}"
+        ownca_not_after: +365d  # valid for one year
+        ownca_not_before: "-1d"  # valid since yesterday
+
+
+  # Create cert for phpmyadmin
+
+    - name: Create private key for new certificate (mysql)
+      community.crypto.openssl_privatekey:
+        path: /certs/pma/certificate.key
+    
+    - name: Create certificate signing request (CSR) for new certificate
+      community.crypto.openssl_csr_pipe:
+        privatekey_path: /certs/pma/certificate.key
+      run_once: true
+      register: csr
+
+    - name: Sign certificate with our CA
+      community.crypto.x509_certificate:
+        path: /certs/pma/certificate.pem
+        csr_content: "{{ csr.csr }}"
+        privatekey_path: /certs/pma/certificate.key
+        provider: ownca
+        ownca_path: /certs/ca-certificate.pem
+        ownca_privatekey_path: /certs/ca-certificate.key
+        ownca_privatekey_passphrase: "{{ lookup('ansible.builtin.password', 'credentials/' + '/ca-certificate-passphrase', length=15) }}"
+        ownca_not_after: +365d  # valid for one year
+        ownca_not_before: "-1d"  # valid since yesterday
+
+
     # Send configuration files to the machine
-    - name: Synchronization of src on the control machine to dest on the remote hosts
-      ansible.posix.synchronize:
+    - name: Copy configuration
+      copy:
         src: configuration
-        dest: /configuration
+        dest: /
+      loop:
+        - configuration
 
     - name: Deploy Docker Compose
       community.docker.docker_compose:
+        recreate: always
         project_src: /kek/
         files:
           - docker-compose.yaml
@@ -141,14 +240,6 @@
         volumes: 
           - '/kek/:/var/www/html'
       register: result
-
-    - name: Print stdout
-      ansible.builtin.debug:
-        var: result.stdout
-    
-    - name: Print stderr lines
-      ansible.builtin.debug:
-        var: result.stderr_lines
 
     - name: Run WP installer and install WP
       community.docker.docker_container:
@@ -174,14 +265,6 @@
           - '/kek/:/var/www/html'
       register: result
 
-    - name: Print stdout
-      ansible.builtin.debug:
-        var: result.stdout
-    
-    - name: Print stderr lines
-      ansible.builtin.debug:
-        var: result.stderr_lines
-
     - name: Create a subdomain for every droplet (useful if we have many machines)
       community.general.cloudflare_dns:
         zone: cloudone.space
@@ -193,9 +276,11 @@
 
     - name: Show instructions to connect
       ansible.builtin.debug:
-        msg: |
-          All done! You can connect to the server on "{{ ansible_ssh_host }}"
-          MySQL root password: "{{ lookup('ansible.builtin.password', 'credentials/' + '/mysqlpassword', length=15) }}"
-          Wordpress DB password: "{{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"
-          Wordpress admin user: blash
-          Wordpress admin password: {{ lookup('ansible.builtin.password', 'credentials/' + '/wpadminpassword', length=15) }}
+        msg:
+          - "All done! You can connect to the server on {{ ansible_ssh_host }}"
+          - "MySQL root password: {{ lookup('ansible.builtin.password', 'credentials/' + '/mysqlpassword', length=15) }}"
+          - "Wordpress DB password: {{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"
+          - "Wordpress admin user: blash"
+          - "Wordpress admin password: {{ lookup('ansible.builtin.password', 'credentials/' + '/wpadminpassword', length=15) }}"
+          - "PHPMyAdmin login: wordpress"
+          - "PHPMyAdmin password: {{ lookup('ansible.builtin.password', 'credentials/' + '/wordpresspassword', length=15) }}"

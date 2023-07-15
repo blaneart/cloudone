@@ -1,3 +1,5 @@
+all: ansible
+
 venv:
 	virtualenv venv --python=python3
 
@@ -11,5 +13,3 @@ ansible: reqs .env
 	. venv/bin/activate; . ./.env; ansible-playbook -i inventory.yaml playbook.yaml
 
 .PHONY = reqs ansible venv all
-
-all: ansible
